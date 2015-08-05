@@ -56,8 +56,7 @@ namespace {
     Pawns::Entry* pi;
 
     // attackedBy[color][piece type] is a bitboard representing all squares
-    // attacked by a given color and piece type, attackedBy[color][ALL_PIECES]
-    // contains all squares attacked by the given color.
+    // attacked by a given color and piece type (can be also ALL_PIECES).
     Bitboard attackedBy[COLOR_NB][PIECE_TYPE_NB];
 
     // kingRing[color] is the zone around the king which is considered
@@ -185,6 +184,8 @@ namespace {
     (FileCBB | FileDBB | FileEBB | FileFBB) & (Rank7BB | Rank6BB | Rank5BB)
   };
 
+  const Value SpaceThreshold = Value(11756);
+
   // King danger constants and variables. The king danger scores are looked-up
   // in KingDanger[]. Various little "meta-bonuses" measuring the strength
   // of the enemy attack are added up into an integer, which is used as an
@@ -213,8 +214,9 @@ namespace {
     const Square Down = (Us == WHITE ? DELTA_S : DELTA_N);
 
     ei.pinnedPieces[Us] = pos.pinned_pieces(Us);
-    ei.attackedBy[Us][ALL_PIECES] = ei.attackedBy[Us][PAWN] = ei.pi->pawn_attacks(Us);
     Bitboard b = ei.attackedBy[Them][KING] = pos.attacks_from<KING>(pos.square<KING>(Them));
+    ei.attackedBy[Them][ALL_PIECES] |= b;
+    ei.attackedBy[Us][ALL_PIECES] |= ei.attackedBy[Us][PAWN] = ei.pi->pawn_attacks(Us);
 
     // Init king safety tables only if we are going to use them
     if (pos.non_pawn_material(Us) >= QueenValueMg)
@@ -378,9 +380,9 @@ namespace {
         attackUnits =  std::min(74, ei.kingAttackersCount[Them] * ei.kingAttackersWeight[Them])
                      +  8 * ei.kingAdjacentZoneAttacksCount[Them]
                      + 25 * popcount<Max15>(undefended)
-                     + 11 * (ei.pinnedPieces[Us] != 0)
-                     - mg_value(score) / 8
-                     - !pos.count<QUEEN>(Them) * 60;
+                     + 11 * !!ei.pinnedPieces[Us]
+                     - 60 * !pos.count<QUEEN>(Them)
+                     - mg_value(score) / 8;
 
         // Analyse the enemy's safe queen contact checks. Firstly, find the
         // undefended squares around the king reachable by the enemy queen...
@@ -655,10 +657,10 @@ namespace {
     behind |= (Us == WHITE ? behind >>  8 : behind <<  8);
     behind |= (Us == WHITE ? behind >> 16 : behind << 16);
 
-    // Since SpaceMask[Us] is fully on our half of the board
+    // Since SpaceMask[Us] is fully on our half of the board...
     assert(unsigned(safe >> (Us == WHITE ? 32 : 0)) == 0);
 
-    // Count safe + (behind & safe) with a single popcount
+    // ...count safe + (behind & safe) with a single popcount
     int bonus = popcount<Full>((Us == WHITE ? safe << 32 : safe >> 32) | (behind & safe));
     int weight =  pos.count<KNIGHT>(Us) + pos.count<BISHOP>(Us)
                 + pos.count<KNIGHT>(Them) + pos.count<BISHOP>(Them);
@@ -696,11 +698,9 @@ namespace {
     score += ei.pi->pawns_score() * Weights[PawnStructure];
 
     // Initialize attack and king safety bitboards
+    ei.attackedBy[WHITE][ALL_PIECES] = ei.attackedBy[BLACK][ALL_PIECES] = 0;
     init_eval_info<WHITE>(pos, ei);
     init_eval_info<BLACK>(pos, ei);
-
-    ei.attackedBy[WHITE][ALL_PIECES] |= ei.attackedBy[WHITE][KING];
-    ei.attackedBy[BLACK][ALL_PIECES] |= ei.attackedBy[BLACK][KING];
 
     // Pawns blocked or on ranks 2 and 3. Will be excluded from the mobility area
     Bitboard blockedPawns[] = {
@@ -744,7 +744,7 @@ namespace {
     }
 
     // Evaluate space for both sides, only during opening
-    if (pos.non_pawn_material(WHITE) + pos.non_pawn_material(BLACK) >= 11756)
+    if (pos.non_pawn_material(WHITE) + pos.non_pawn_material(BLACK) >= SpaceThreshold)
         score += (evaluate_space<WHITE>(pos, ei) - evaluate_space<BLACK>(pos, ei)) * Weights[Space];
 
     // Scale winning side if position is more drawish than it appears
@@ -874,8 +874,8 @@ namespace Eval {
 
   /// trace() is like evaluate(), but instead of returning a value, it returns
   /// a string (suitable for outputting to stdout) that contains the detailed
-  /// descriptions and values of each evaluation term. It's mainly used for
-  /// debugging.
+  /// descriptions and values of each evaluation term. Useful for debugging.
+
   std::string trace(const Position& pos) {
     return Tracing::do_trace(pos);
   }
