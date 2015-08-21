@@ -96,10 +96,21 @@ namespace {
     {289, 344}, {233, 201}, {221, 273}, {46, 0}, {322, 0}
   };
 
-  Score operator*(Score s, const Weight& w) {
-    return make_score(mg_value(s) * w.mg / 256, eg_value(s) * w.eg / 256);
-  }
+  struct ExtScore {
 
+    ExtScore(Value m, Value e) : mg(m), eg(e) {}
+
+    void operator+=(Score s) { mg += 256 * mg_value(s), eg += 256 * eg_value(s); }
+
+    void operator+=(const ExtScore& s) { mg += s.mg, eg += s.eg; }
+    void operator-=(const ExtScore& s) { mg -= s.mg, eg -= s.eg; }
+
+    Value mg, eg;
+  };
+
+  ExtScore operator*(Score s, const Weight& w) {
+    return ExtScore(mg_value(s) * w.mg, eg_value(s) * w.eg);
+  }
 
   #define V(v) Value(v)
   #define S(mg, eg) make_score(mg, eg)
@@ -551,7 +562,7 @@ namespace {
   // evaluate_passed_pawns() evaluates the passed pawns of the given color
 
   template<Color Us, bool Trace>
-  Score evaluate_passed_pawns(const Position& pos, const EvalInfo& ei) {
+  ExtScore evaluate_passed_pawns(const Position& pos, const EvalInfo& ei) {
 
     const Color Them = (Us == WHITE ? BLACK : WHITE);
 
@@ -623,8 +634,8 @@ namespace {
         score += make_score(mbonus, ebonus);
     }
 
-    if (Trace)
-        Tracing::write(Tracing::PASSED, Us, score * Weights[PassedPawns]);
+    //if (Trace)
+    //    Tracing::write(Tracing::PASSED, Us, score * Weights[PassedPawns]);
 
     // Add the scores to the middlegame and endgame eval
     return score * Weights[PassedPawns];
@@ -675,12 +686,13 @@ namespace {
     assert(!pos.checkers());
 
     EvalInfo ei;
-    Score score, mobility[2] = { SCORE_ZERO, SCORE_ZERO };
+    Score mobility[2] = { SCORE_ZERO, SCORE_ZERO };
+    ExtScore score = ExtScore(VALUE_ZERO, VALUE_ZERO);
 
     // Initialize score by reading the incrementally updated scores included
     // in the position object (material + piece square tables).
     // Score is computed from the point of view of white.
-    score = pos.psq_score();
+    score += pos.psq_score();
 
     // Probe the material hash table
     ei.mi = Material::probe(pos);
@@ -729,8 +741,8 @@ namespace {
             - evaluate_threats<BLACK, Trace>(pos, ei);
 
     // Evaluate passed pawns, we need full attack information including king
-    score +=  evaluate_passed_pawns<WHITE, Trace>(pos, ei)
-            - evaluate_passed_pawns<BLACK, Trace>(pos, ei);
+    score += evaluate_passed_pawns<WHITE, Trace>(pos, ei);
+    score -= evaluate_passed_pawns<BLACK, Trace>(pos, ei);
 
     // If both sides have only pawns, score for potential unstoppable pawns
     if (!pos.non_pawn_material(WHITE) && !pos.non_pawn_material(BLACK))
@@ -740,7 +752,7 @@ namespace {
             score += int(relative_rank(WHITE, frontmost_sq(WHITE, b))) * Unstoppable;
 
         if ((b = ei.pi->passed_pawns(BLACK)) != 0)
-            score -= int(relative_rank(BLACK, frontmost_sq(BLACK, b))) * Unstoppable;
+            score += -int(relative_rank(BLACK, frontmost_sq(BLACK, b))) * Unstoppable;
     }
 
     // Evaluate space for both sides, only during opening
@@ -748,7 +760,7 @@ namespace {
         score += (evaluate_space<WHITE>(pos, ei) - evaluate_space<BLACK>(pos, ei)) * Weights[Space];
 
     // Scale winning side if position is more drawish than it appears
-    Color strongSide = eg_value(score) > VALUE_DRAW ? WHITE : BLACK;
+    Color strongSide = score.eg > VALUE_DRAW ? WHITE : BLACK;
     ScaleFactor sf = ei.mi->scale_factor(pos, strongSide);
 
     // If we don't already have an unusual scale factor, check for certain
@@ -771,30 +783,30 @@ namespace {
         }
         // Endings where weaker side can place his king in front of the opponent's
         // pawns are drawish.
-        else if (    abs(eg_value(score)) <= BishopValueEg
+        else if (    abs(score.eg) <= BishopValueEg * 256
                  &&  ei.pi->pawn_span(strongSide) <= 1
                  && !pos.pawn_passed(~strongSide, pos.square<KING>(~strongSide)))
                  sf = ei.pi->pawn_span(strongSide) ? ScaleFactor(56) : ScaleFactor(38);
     }
 
     // Interpolate between a middlegame and a (scaled by 'sf') endgame score
-    Value v =  mg_value(score) * int(ei.mi->game_phase())
-             + eg_value(score) * int(PHASE_MIDGAME - ei.mi->game_phase()) * sf / SCALE_FACTOR_NORMAL;
+    Value v =  (score.mg / 256) * int(ei.mi->game_phase())
+             + (score.eg / 256) * int(PHASE_MIDGAME - ei.mi->game_phase()) * sf / SCALE_FACTOR_NORMAL;
 
     v /= int(PHASE_MIDGAME);
 
     // In case of tracing add all single evaluation terms for both white and black
-    if (Trace)
-    {
-        Tracing::write(Tracing::MATERIAL, pos.psq_score());
-        Tracing::write(Tracing::IMBALANCE, ei.mi->imbalance());
-        Tracing::write(PAWN, ei.pi->pawns_score());
-        Tracing::write(Tracing::MOBILITY, mobility[WHITE] * Weights[Mobility]
-                                        , mobility[BLACK] * Weights[Mobility]);
-        Tracing::write(Tracing::SPACE, evaluate_space<WHITE>(pos, ei) * Weights[Space]
-                                     , evaluate_space<BLACK>(pos, ei) * Weights[Space]);
-        Tracing::write(Tracing::TOTAL, score);
-    }
+    //if (Trace)
+    //{
+    //    Tracing::write(Tracing::MATERIAL, pos.psq_score());
+    //    Tracing::write(Tracing::IMBALANCE, ei.mi->imbalance());
+    //    Tracing::write(PAWN, ei.pi->pawns_score());
+    //    Tracing::write(Tracing::MOBILITY, mobility[WHITE] * Weights[Mobility]
+    //                                    , mobility[BLACK] * Weights[Mobility]);
+    //    Tracing::write(Tracing::SPACE, evaluate_space<WHITE>(pos, ei) * Weights[Space]
+    //                                 , evaluate_space<BLACK>(pos, ei) * Weights[Space]);
+    //    Tracing::write(Tracing::TOTAL, score);
+    //}
 
     return (pos.side_to_move() == WHITE ? v : -v) + Eval::Tempo; // Side to move point of view
   }
@@ -892,7 +904,8 @@ namespace Eval {
     for (int i = 0; i < 400; ++i)
     {
         t = std::min(Peak, std::min(i * i * 27, t + MaxSlope));
-        KingDanger[i] = make_score(t / 1000, 0) * Weights[KingSafety];
+        ExtScore s = make_score(t / 1000, 0) * Weights[KingSafety];
+        KingDanger[i] = make_score(s.mg / 256, s.eg / 256);
     }
   }
 
