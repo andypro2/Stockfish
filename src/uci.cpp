@@ -44,6 +44,37 @@ namespace {
   Search::StateStackPtr SetupStates;
 
 
+  template<GenType T>
+  void get_moves_type(Position& pos) {
+      string str;
+      for (MoveList<T> moveList(pos); *moveList; ++moveList) {
+        str.append(UCI::move(*moveList, false));
+        str.append(" ");
+      }
+      sync_cout << str << sync_endl;
+  }
+
+  void get_moves(Position& pos, istringstream& is) {
+      string token;
+      is >> token;
+
+      if (token == "legal") {
+          get_moves_type<LEGAL>(pos);
+      } else if (token == "captures") {
+          get_moves_type<CAPTURES>(pos);
+      } else if (token == "quiets") {
+          get_moves_type<QUIETS>(pos);
+      } else if (token == "quiet_checks") {
+          get_moves_type<QUIET_CHECKS>(pos);
+      } else if (token == "evasions") {
+          get_moves_type<EVASIONS>(pos);
+      } else if (token == "non_evasions") {
+          get_moves_type<NON_EVASIONS>(pos);
+      } else {
+          sync_cout << "Unknown move type" << sync_endl;
+      }
+  }
+
   // position() is called when engine receives the "position" UCI command.
   // The function sets up the position described in the given FEN string ("fen")
   // or the starting position ("startpos") and then makes the moves given in the
@@ -189,6 +220,7 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "bench")      benchmark(pos, is);
       else if (token == "d")          sync_cout << pos << sync_endl;
       else if (token == "eval")       sync_cout << Eval::trace(pos) << sync_endl;
+      else if (token == "getmoves")   get_moves(pos, is);
       else if (token == "perft")
       {
           int depth;
