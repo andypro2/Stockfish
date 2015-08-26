@@ -85,6 +85,24 @@ namespace {
         }
     }
 
+    // to generate position object only, do not touch global variables
+    void position2(Position& pos, istringstream& is) {
+
+        Move m;
+        string token;
+
+        generate_position(pos, is);
+
+        Search::StateStackPtr tempState = Search::StateStackPtr(new std::stack<StateInfo>());
+
+        // Parse move list (if any)
+        while (is >> token && (m = UCI::to_move(pos, token)) != MOVE_NONE)
+        {
+            tempState->push(StateInfo());
+            pos.do_move(m, tempState->top());
+        }
+    }
+
     template<GenType T>
         void get_moves_type(Position& pos, istringstream& is) {
             string str;
@@ -94,7 +112,7 @@ namespace {
             if (token == "position") {
                 // use the specified position
                 Position specifiedPos(StartFEN, false, Threads.main());
-                generate_position(specifiedPos, is);
+                position2(specifiedPos, is);
                 for (MoveList<T> moveList(specifiedPos); *moveList; ++moveList) {
                     str.append(UCI::move(*moveList, false));
                     str.append(" ");
