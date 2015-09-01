@@ -1,0 +1,6 @@
+*.o
+stockfish
+.depend
+tags
+libs/
+obj/
