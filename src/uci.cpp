@@ -106,6 +106,7 @@ namespace {
     template<GenType T>
         void get_moves_type(Position& pos, istringstream& is) {
             string str;
+            str.append("allmoves ");
 
             string token;
             is >> token;
